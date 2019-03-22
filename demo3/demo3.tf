@@ -2,7 +2,7 @@ provider "aws" {
   region = "us-east-2"
 }
 
-          ###Networking###
+          ### Vpc and subnets ###
 
 resource "aws_vpc" "svyatoslav_vpc" {
   cidr_block = "192.168.0.0/16"
@@ -26,37 +26,99 @@ resource "aws_subnet" "public_subnet" {
   }
 }
 
+resource "aws_subnet" "private_subnet" {
+  cidr_block = "192.168.2.0/24"
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "private_subnet"
+    ita_group = "Lv-378"
+    owner = "svyatoslav"
+  }
+}
+
+resource "aws_subnet" "database1_subnet" {
+  cidr_block = "192.168.3.0/24"
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "database1_subnet"
+    ita_group = "Lv-378"
+    owner = "svyatoslav"
+  }
+}
+
+resource "aws_subnet" "database2_subnet" {
+  cidr_block = "192.168.4.0/24"
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "database2_subnet"
+    ita_group = "Lv-378"
+    owner = "svyatoslav"
+  }
+}
+
+
+          ### Network elements ###
 resource "aws_network_interface" "bastion_ni" {
   subnet_id ="${aws_subnet.public_subnet.id}"
   security_groups = ["${aws_security_group.basic_web_sg.id}"]
+  description = "Bastion Network Interface"
 
   tags ={
       Name = "bastion_ni"
       ita_group = "Lv-378"
       owner = "svyatoslav"
   }
+}
 
-  attachment = {
-  instance = "${aws_instance.bastion.id}"
-  device_index = 1
+resource "aws_network_interface" "jenkins_ni" {
+  subnet_id ="${aws_subnet.public_subnet.id}"
+  security_groups = ["${aws_security_group.basic_web_sg.id}"]
+    description = "Jenkins Network Interface"
+
+  tags ={
+      Name = "jenkins_ni"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
   }
 }
 
+resource "aws_network_interface" "rds_ni" {
+  subnet_id ="${aws_subnet.database1_subnet.id}"
+  security_groups = ["${aws_security_group.basic_web_sg.id}"]
+  description = "RDSNetworkInterface"
+
+  tags ={
+      Name = "rds_ni"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+
+  lifecycle = {
+    ignore_changes = true
+  }
+}
+
+            ### Security groups ###
 resource "aws_security_group" "basic_web_sg" {
   vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
   description = "ssh"
-
   ingress = {
   from_port = 22
   to_port = 22
-  protocol = "-1"
+  protocol = "tcp"
   cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress = {
   from_port = 80
   to_port = 80
-  protocol = "-1"
+  protocol = "tcp"
   cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -68,9 +130,9 @@ resource "aws_security_group" "basic_web_sg" {
   }
 
   ingress = {
-  from_port = 80
-  to_port = 80
-  protocol = "-1"
+  from_port = 8080
+  to_port = 8080
+  protocol = "tcp"
   cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -88,6 +150,31 @@ resource "aws_security_group" "basic_web_sg" {
   }
 }
 
+resource "aws_security_group" "all_traphic_sg" {
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  description = "all"
+
+  ingress = {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress = {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "all_traphic_sg"
+    ita_group = "Lv-378"
+    owner = "svyatoslav"
+  }
+}
+
 
             ###Instances###
 
@@ -95,7 +182,11 @@ resource "aws_instance" "bastion" {
   instance_type = "t2.micro"
   ami = "ami-02bcbb802e03574ba"
   
-  availability_zone = "us-east-2a"
+  network_interface = {
+    network_interface_id = "${aws_network_interface.bastion_ni.id}"
+    device_index = 0
+    delete_on_termination = false
+  }
   key_name = "svyatoslav_key"
 
 
@@ -127,14 +218,69 @@ resource "aws_instance" "jenkins-server" {
   }
 }
 
-            ###Volumes###
+            ### S3 ###
 
-/*resource "aws_ebs_volume" "bastion_volume" {
-  availability_zone = "us-east-2a"
-  size = 10
+resource "aws_s3_bucket" "war_bucket" {
+  bucket = "svyatoslav-bucket-for-oms.war"
+  acl = "public-read"
+  force_destroy = false
+
   tags = {
-    Name = "bastion-volume"
-    ita_group = "Lv-378"
-    owner = "svyatoslav"
+      Name = "svyatoslav-bucket-for-oms.war"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
   }
-}*/
+}
+
+          ### Pipeline ###
+
+resource "aws_codebuild_project" "build_oms_image" {
+  name = "oms-image-build"
+  description = "Rebuilds OMS Docker image"
+  service_role = "arn:aws:iam::536460581283:role/code-build-role"
+
+  environment = {
+    compute_type = "BUILD_GENERAL1_SMALL"
+    image = "aws/codebuild/docker:18.09.0"
+    type = "LINUX_CONTAINER"
+    privileged_mode = true
+  }
+
+  source = {
+    type = "S3"
+    location = "${aws_s3_bucket.war_bucket.bucket}/war/"
+  }
+
+  artifacts = {
+    type = "NO_ARTIFACTS"
+  }
+
+  tags = {
+      Name = "oms-image-build"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+}
+
+          ### RDS ###
+
+resource "aws_db_instance" "oms_db" {
+  allocated_storage = 20
+  instance_class = "db.t2.micro"
+  skip_final_snapshot = true
+  copy_tags_to_snapshot = true
+  auto_minor_version_upgrade = false
+  tags = {
+      Name = "oms_db"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+      workload-type = "other"
+  }
+
+  lifecycle = {
+    ignore_changes = [
+       "deletion_protection",
+      "enabled_cloudwatch_logs_exports"
+    ]
+  }
+}
