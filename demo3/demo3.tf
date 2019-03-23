@@ -246,6 +246,12 @@ resource "aws_codebuild_project" "build_oms_image" {
     privileged_mode = true
   }
 
+  lifecycle = {
+    ignore_changes = [
+      "source"
+    ]
+  }
+
   source = {
     type = "S3"
     location = "${aws_s3_bucket.war_bucket.bucket}/war/"
@@ -261,6 +267,66 @@ resource "aws_codebuild_project" "build_oms_image" {
       owner = "svyatoslav"
   }
 }
+
+resource "aws_ecr_repository" "tomcat-oms" {
+  name = "tomcat-oms"
+
+  tags = {
+      Name = "tomcat-oms"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+}
+
+resource "aws_ecs_cluster" "svyatoslav-cluster" {
+  name = "svyatoslav-cluster"
+
+  tags = {
+      Name = "svyatoslav-cluster"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+}
+
+resource "aws_ecs_service" "tomcat-oms-ecs-service" {
+  name = "tomcat-oms-container"
+  cluster = "${aws_ecs_cluster.svyatoslav-cluster.id}"
+  task_definition = "${aws_ecs_task_definition.tomcat-oms-server.id}"
+  desired_count = 1
+  launch_type = "FARGATE"
+  network_configuration = {
+    subnets = ["${aws_subnet.public_subnet.id}"]
+    security_groups = ["${aws_security_group.basic_web_sg.id}"]
+    assign_public_ip = true
+  }
+
+  tags = {
+      Name = "tomcat-oms-ecs-service"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+
+  depends_on = ["aws_ecs_task_definition.tomcat-oms-server"]
+}
+
+resource "aws_ecs_task_definition" "tomcat-oms-server" {
+  family = "Tomcat-OMS-Server"
+  container_definitions = "${file("data/task-definitions/service.json")}"
+  network_mode = "awsvpc"
+  cpu = 256
+  memory = 512
+  requires_compatibilities = ["FARGATE"]
+  task_role_arn = "arn:aws:iam::536460581283:role/ecsTaskExecutionRole"
+  execution_role_arn = "arn:aws:iam::536460581283:role/ecsTaskExecutionRole"
+
+  tags = {
+      Name = "tomcat-oms-server"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+}
+
+
 
           ### RDS ###
 
