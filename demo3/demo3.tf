@@ -104,6 +104,19 @@ resource "aws_network_interface" "rds_ni" {
   }
 }
 
+
+resource "aws_eip" "bastion_eip" {
+  vpc = true
+  network_interface = "${aws_network_interface.bastion_ni.id}"
+
+  tags ={
+      Name = "bastion_eip"
+      ita_group = "Lv-378"
+      owner = "svyatoslav"
+  }
+}
+
+
             ### Security groups ###
 resource "aws_security_group" "basic_web_sg" {
   vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
@@ -175,6 +188,31 @@ resource "aws_security_group" "all_traphic_sg" {
   }
 }
 
+resource "aws_security_group" "only_ssh" {
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  description = "only ssh"
+  name = "only_ssh"
+
+  ingress = {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress = {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "only_ssh_sg"
+    ita_group = "Lv-378"
+    owner = "svyatoslav"
+  }
+}
 
             ###Instances###
 
@@ -288,7 +326,7 @@ resource "aws_ecs_cluster" "svyatoslav-cluster" {
   }
 }
 
-resource "aws_ecs_service" "tomcat-oms-ecs-service" {
+/*resource "aws_ecs_service" "tomcat-oms-ecs-service" {
   name = "tomcat-oms-container"
   cluster = "${aws_ecs_cluster.svyatoslav-cluster.id}"
   task_definition = "${aws_ecs_task_definition.tomcat-oms-server.id}"
@@ -308,7 +346,7 @@ resource "aws_ecs_service" "tomcat-oms-ecs-service" {
 
   depends_on = ["aws_ecs_task_definition.tomcat-oms-server"]
 }
-
+*/
 resource "aws_ecs_task_definition" "tomcat-oms-server" {
   family = "Tomcat-OMS-Server"
   container_definitions = "${file("data/task-definitions/service.json")}"
