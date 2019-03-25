@@ -105,7 +105,7 @@ resource "aws_network_interface" "rds_ni" {
 }
 
 
-resource "aws_eip" "bastion_eip" {
+/*resource "aws_eip" "bastion_eip" {
   vpc = true
   network_interface = "${aws_network_interface.bastion_ni.id}"
 
@@ -115,7 +115,7 @@ resource "aws_eip" "bastion_eip" {
       owner = "svyatoslav"
   }
 }
-
+*/
 
             ### Security groups ###
 resource "aws_security_group" "basic_web_sg" {
@@ -148,6 +148,14 @@ resource "aws_security_group" "basic_web_sg" {
   protocol = "tcp"
   cidr_blocks = ["0.0.0.0/0"]
   }
+
+  ingress = {
+  from_port = 3306
+  to_port = 3306
+  protocol = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]
+  }
+
 
   egress = {
     from_port = 0
@@ -326,7 +334,7 @@ resource "aws_ecs_cluster" "svyatoslav-cluster" {
   }
 }
 
-/*resource "aws_ecs_service" "tomcat-oms-ecs-service" {
+resource "aws_ecs_service" "tomcat-oms-ecs-service" {
   name = "tomcat-oms-container"
   cluster = "${aws_ecs_cluster.svyatoslav-cluster.id}"
   task_definition = "${aws_ecs_task_definition.tomcat-oms-server.id}"
@@ -346,7 +354,6 @@ resource "aws_ecs_cluster" "svyatoslav-cluster" {
 
   depends_on = ["aws_ecs_task_definition.tomcat-oms-server"]
 }
-*/
 resource "aws_ecs_task_definition" "tomcat-oms-server" {
   family = "Tomcat-OMS-Server"
   container_definitions = "${file("data/task-definitions/service.json")}"
@@ -356,6 +363,7 @@ resource "aws_ecs_task_definition" "tomcat-oms-server" {
   requires_compatibilities = ["FARGATE"]
   task_role_arn = "arn:aws:iam::536460581283:role/ecsTaskExecutionRole"
   execution_role_arn = "arn:aws:iam::536460581283:role/ecsTaskExecutionRole"
+  
 
   tags = {
       Name = "tomcat-oms-server"
