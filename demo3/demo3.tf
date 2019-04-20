@@ -18,6 +18,7 @@ resource "aws_subnet" "public_subnet" {
   cidr_block = "192.168.1.0/24"
   vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
   map_public_ip_on_launch = true
+  availability_zone = "us-east-2a"
 
   tags = {
     Name = "public_subnet"
@@ -29,7 +30,8 @@ resource "aws_subnet" "public_subnet" {
 resource "aws_subnet" "private_subnet" {
   cidr_block = "192.168.2.0/24"
   vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
+  availability_zone = "us-east-2a"
 
   tags = {
     Name = "private_subnet"
@@ -38,48 +40,53 @@ resource "aws_subnet" "private_subnet" {
   }
 }
 
-resource "aws_subnet" "database1_subnet" {
+resource "aws_subnet" "database_subnet" {
   cidr_block = "192.168.3.0/24"
   vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
   map_public_ip_on_launch = true
+  availability_zone = "us-east-2b"
 
   tags = {
-    Name = "database1_subnet"
+    Name = "database_subnet"
     ita_group = "Lv-378"
     owner = "svyatoslav"
   }
 }
 
-resource "aws_subnet" "database2_subnet" {
-  cidr_block = "192.168.4.0/24"
-  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
-  map_public_ip_on_launch = true
+resource "aws_db_subnet_group" "oms_db_subgroup" {
+  name = "oms_db_subgroup"
+  description = "Group of public subnets to db"
+  subnet_ids = [
+    "${aws_subnet.public_subnet.id}",
+    "${aws_subnet.database_subnet.id}"
+  ]
 
   tags = {
-    Name = "database2_subnet"
+    Name = "oms_db_subgroup"
     ita_group = "Lv-378"
     owner = "svyatoslav"
   }
 }
 
 
-          ### Network elements ###
-resource "aws_network_interface" "bastion_ni" {
-  subnet_id ="${aws_subnet.public_subnet.id}"
-  security_groups = ["${aws_security_group.basic_web_sg.id}"]
-  description = "Bastion Network Interface"
+resource "aws_eip" "jenkins_eip" {
+  network_interface = "${aws_network_interface.jenkins_ni.id}"
+  vpc = true
 
   tags ={
-      Name = "bastion_ni"
+      Name = "jenkins_eip"
       ita_group = "Lv-378"
       owner = "svyatoslav"
   }
 }
 
+
+          ### Network elements ###
+
 resource "aws_network_interface" "jenkins_ni" {
   subnet_id ="${aws_subnet.public_subnet.id}"
   security_groups = ["${aws_security_group.basic_web_sg.id}"]
-    description = "Jenkins Network Interface"
+  description = "Jenkins Network Interface"
 
   tags ={
       Name = "jenkins_ni"
@@ -88,13 +95,13 @@ resource "aws_network_interface" "jenkins_ni" {
   }
 }
 
-resource "aws_network_interface" "rds_ni" {
-  subnet_id ="${aws_subnet.database1_subnet.id}"
-  security_groups = ["${aws_security_group.basic_web_sg.id}"]
+resource "aws_network_interface" "oms_db_ni" {
+  subnet_id ="${aws_subnet.public_subnet.id}"
+  security_groups = ["${aws_security_group.only_mysql.id}"]
   description = "RDSNetworkInterface"
 
   tags ={
-      Name = "rds_ni"
+      Name = "oms_db_ni"
       ita_group = "Lv-378"
       owner = "svyatoslav"
   }
@@ -104,18 +111,6 @@ resource "aws_network_interface" "rds_ni" {
   }
 }
 
-
-/*resource "aws_eip" "bastion_eip" {
-  vpc = true
-  network_interface = "${aws_network_interface.bastion_ni.id}"
-
-  tags ={
-      Name = "bastion_eip"
-      ita_group = "Lv-378"
-      owner = "svyatoslav"
-  }
-}
-*/
 
             ### Security groups ###
 resource "aws_security_group" "basic_web_sg" {
@@ -222,32 +217,33 @@ resource "aws_security_group" "only_ssh" {
   }
 }
 
-            ###Instances###
+resource "aws_security_group" "only_mysql" {
+  vpc_id = "${aws_vpc.svyatoslav_vpc.id}"
+  description = "only mysql"
+  name = "only_mysql"
 
-resource "aws_instance" "bastion" {
-  instance_type = "t2.micro"
-  ami = "ami-02bcbb802e03574ba"
-  
-  network_interface = {
-    network_interface_id = "${aws_network_interface.bastion_ni.id}"
-    device_index = 0
-    delete_on_termination = false
+  ingress = {
+    from_port = 3306
+    to_port = 3306
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-  key_name = "svyatoslav_key"
 
+  egress = {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-  volume_tags = {
-    size = 10
-    Name = "bastion_volume"
+  tags = {
+    Name = "only_mysql_sg"
     ita_group = "Lv-378"
     owner = "svyatoslav"
   }
-  tags ={
-      Name = "bastion"
-      ita_group = "Lv-378"
-      owner = "svyatoslav"
-  }
 }
+            ###Instances###
+
 
 resource "aws_instance" "jenkins-server" {
   instance_type = "t2.micro"
@@ -379,20 +375,34 @@ resource "aws_ecs_task_definition" "tomcat-oms-server" {
 resource "aws_db_instance" "oms_db" {
   allocated_storage = 20
   instance_class = "db.t2.micro"
-  skip_final_snapshot = true
+  storage_type = "gp2"
+  engine = "mariadb"
+  engine_version = "10.3.8"
+  name = "oms_db"
+  username = "svyatoslav"
+  password = "password"
+  license_model = "general-public-license"
+  port = 3306
+  publicly_accessible = true
+  vpc_security_group_ids = ["${aws_security_group.only_mysql.id}"]
+  availability_zone = "us-east-2a"
+  db_subnet_group_name = "${aws_db_subnet_group.oms_db_subgroup.name}"
+  identifier = "oms-db"
+  multi_az = false
+  allow_major_version_upgrade = true
   copy_tags_to_snapshot = true
+  deletion_protection = true
+  skip_final_snapshot = true
   auto_minor_version_upgrade = false
+
+
   tags = {
       Name = "oms_db"
       ita_group = "Lv-378"
       owner = "svyatoslav"
-      workload-type = "other"
   }
 
-  lifecycle = {
-    ignore_changes = [
-       "deletion_protection",
-      "enabled_cloudwatch_logs_exports"
+  depends_on = [
+    "aws_db_subnet_group.oms_db_subgroup"
     ]
-  }
 }
